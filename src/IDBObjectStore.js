@@ -22,6 +22,7 @@
      * @param {Object} val
      */
     IDBObjectStore.prototype.__setReadyState = function(key, val){
+        idbModules.DEBUG && console.log('setting ready state', key, val);
         this.__ready[key] = val;
     };
     
@@ -29,14 +30,14 @@
      * Called by all operations on the object store, waits till the store is ready, and then performs the operation
      * @param {Object} callback
      */
-    IDBObjectStore.prototype.__waitForReady = function(callback, key){
+    IDBObjectStore.prototype.__waitForReady = function(desc, callback, key, excludeKey){
         var ready = true;
         if (typeof key !== "undefined") {
             ready = (typeof this.__ready[key] === "undefined") ? true : this.__ready[key];
         }
         else {
             for (var x in this.__ready) {
-                if (!this.__ready[x]) {
+                if (x !== excludeKey && !this.__ready[x]) {
                     ready = false;
                 }
             }
@@ -46,10 +47,10 @@
             callback();
         }
         else {
-            idbModules.DEBUG && console.log("Waiting for to be ready", key);
+            idbModules.DEBUG && console.log("Waiting for to be ready", key, "excluding", excludeKey, this.__ready);
             var me = this;
             window.setTimeout(function(){
-                me.__waitForReady(callback, key);
+                me.__waitForReady(desc, callback, key, excludeKey);
             }, 100);
         }
     };
@@ -60,7 +61,7 @@
      */
     IDBObjectStore.prototype.__getStoreProps = function(tx, callback, waitOnProperty){
         var me = this;
-        this.__waitForReady(function(){
+        this.__waitForReady('__getStoreProps', function(){
             if (me.__storeProps) {
                 idbModules.DEBUG && console.log("Store properties - cached", me.__storeProps);
                 callback(me.__storeProps);
@@ -231,7 +232,7 @@
         // TODO Key should also be a key range
         var me = this;
         return me.transaction.__addToTransactionQueue(function(tx, args, success, error){
-            me.__waitForReady(function(){
+            me.__waitForReady('get', function(){
                 var primaryKey = idbModules.Key.encode(key);
                 idbModules.DEBUG && console.log("Fetching", me.name, primaryKey);
                 tx.executeSql("SELECT * FROM " + idbModules.util.quote(me.name) + " where key = ?", [primaryKey], function(tx, data){
@@ -260,7 +261,7 @@
         // TODO key should also support key ranges
         var me = this;
         return me.transaction.__addToTransactionQueue(function(tx, args, success, error){
-            me.__waitForReady(function(){
+            me.__waitForReady('delete', function(){
                 var primaryKey = idbModules.Key.encode(key);
                 idbModules.DEBUG && console.log("Fetching", me.name, primaryKey);
                 tx.executeSql("DELETE FROM " + idbModules.util.quote(me.name) + " where key = ?", [primaryKey], function(tx, data){
@@ -276,7 +277,7 @@
     IDBObjectStore.prototype.clear = function(){
         var me = this;
         return me.transaction.__addToTransactionQueue(function(tx, args, success, error){
-            me.__waitForReady(function(){
+            me.__waitForReady('clear', function(){
                 tx.executeSql("DELETE FROM " + idbModules.util.quote(me.name), [], function(tx, data){
                     idbModules.DEBUG && console.log("Cleared all records from database", data.rowsAffected);
                     success();
@@ -290,7 +291,7 @@
     IDBObjectStore.prototype.count = function(key){
         var me = this;
         return me.transaction.__addToTransactionQueue(function(tx, args, success, error){
-            me.__waitForReady(function(){
+            me.__waitForReady('count', function(){
                 var sql = "SELECT * FROM " + idbModules.util.quote(me.name) + ((typeof key !== "undefined") ? " WHERE key = ?" : "");
                 var sqlValues = [];
                 (typeof key !== "undefined") && sqlValues.push(idbModules.Key.encode(key));
@@ -315,13 +316,15 @@
     };
     
     IDBObjectStore.prototype.createIndex = function(indexName, keyPath, optionalParameters){
-        var me = this;
+        var me = this,
+            readyStateName = "createIndex" + indexName;
+
         optionalParameters = optionalParameters || {};
-        me.__setReadyState("createIndex", false);
+        me.__setReadyState(readyStateName, false);
         var result = new idbModules.IDBIndex(indexName, me);
-        me.__waitForReady(function(){
+        me.__waitForReady('createIndex', function(){
             result.__createIndex(indexName, keyPath, optionalParameters);
-        }, "createObjectStore");
+        }, undefined, readyStateName);
         me.indexNames.push(indexName);
         return result;
     };
